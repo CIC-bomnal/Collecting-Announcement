@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "WebFetch(domain:www.k-startup.go.kr)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

@@ -9,8 +9,22 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 
+from bs4 import BeautifulSoup
+from kiwipiepy import Kiwi
+
 
 logger = logging.getLogger('announcement_collector')
+
+# Kiwi 형태소 분석기 초기화 (싱글톤)
+_kiwi_instance = None
+
+
+def get_kiwi():
+    """Kiwi 인스턴스 반환 (싱글톤)"""
+    global _kiwi_instance
+    if _kiwi_instance is None:
+        _kiwi_instance = Kiwi()
+    return _kiwi_instance
 
 
 class NaraAPIClient:
@@ -145,6 +159,84 @@ class NaraAPIClient:
                 return 0
         except Exception:
             return 0
+
+    def fetch_overview_from_page(self, url: str) -> str:
+        """
+        나라장터 상세페이지에서 과업개요 크롤링
+
+        Args:
+            url: 공고 상세페이지 URL (bidNtceUrl)
+
+        Returns:
+            과업개요 문자열 또는 빈 문자열
+        """
+        if not url:
+            return ''
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            response.encoding = 'utf-8'
+
+            if response.status_code != 200:
+                logger.debug(f"나라장터 상세페이지 접근 실패: {url} (status: {response.status_code})")
+                return ''
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # 과업개요/사업개요/용역개요 섹션 찾기
+            overview_keywords = ['과업개요', '사업개요', '용역개요', '입찰개요', '공고내용']
+
+            # 방법 1: 테이블에서 찾기 (나라장터 일반 구조)
+            for th in soup.find_all(['th', 'dt']):
+                th_text = th.get_text(strip=True)
+                if any(keyword in th_text for keyword in overview_keywords):
+                    # 다음 td 또는 dd 찾기
+                    td = th.find_next(['td', 'dd'])
+                    if td:
+                        text = td.get_text(separator=' ', strip=True)
+                        # 연속 공백 정리
+                        text = re.sub(r'\s+', ' ', text)
+                        return text[:1000] if text else ''
+
+            # 방법 2: 특정 div/section 클래스로 찾기
+            content_selectors = [
+                'div.contents',
+                'div.content',
+                'div.view_content',
+                'div.bid_content',
+                'section.contents'
+            ]
+
+            for selector in content_selectors:
+                content_div = soup.select_one(selector)
+                if content_div:
+                    text = content_div.get_text(separator=' ', strip=True)
+                    text = re.sub(r'\s+', ' ', text)
+                    if len(text) > 50:
+                        return text[:1000]
+
+            # 방법 3: 본문 전체에서 키워드 주변 텍스트 추출
+            page_text = soup.get_text()
+            for keyword in overview_keywords:
+                idx = page_text.find(keyword)
+                if idx != -1:
+                    # 키워드 이후 500자 추출
+                    excerpt = page_text[idx:idx + 500]
+                    excerpt = re.sub(r'\s+', ' ', excerpt)
+                    return excerpt.strip()
+
+            return ''
+
+        except requests.exceptions.Timeout:
+            logger.debug(f"나라장터 상세페이지 타임아웃: {url}")
+            return ''
+        except Exception as e:
+            logger.debug(f"나라장터 과업개요 크롤링 오류: {str(e)}")
+            return ''
 
     def _parse_response(self, response_data: Dict) -> List[Dict]:
         """
@@ -372,9 +464,78 @@ class KStartupAPIClient:
 
         return '정보없음'
 
+    def fetch_budget_from_page(self, pbanc_sn: str) -> str:
+        """
+        K-Startup 상세페이지에서 예산 정보 크롤링
+
+        Args:
+            pbanc_sn: 공고 고유번호
+
+        Returns:
+            예산 문자열 또는 '정보없음'
+        """
+        if not pbanc_sn:
+            return '정보없음'
+
+        url = f"https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do?schM=view&pbancSn={pbanc_sn}"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            response.encoding = 'utf-8'
+
+            if response.status_code != 200:
+                logger.debug(f"K-Startup 상세페이지 접근 실패: {url} (status: {response.status_code})")
+                return '정보없음'
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # 지원내용/지원규모 섹션 찾기
+            page_text = soup.get_text()
+
+            # 예산 추출 패턴들
+            budget_patterns = [
+                # 지원규모: 1억원 이내, 지원규모: 최대 5,000만원
+                r'지원규모[:\s]*(?:최대\s*)?(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
+                # 총 사업비: 00억원
+                r'총\s*사업비[:\s]*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
+                # 사업비 지원: 00만원
+                r'사업비\s*지원[:\s]*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
+                # 00억원 ~ 00억원 이내
+                r'(\d+(?:\.\d+)?)\s*(억|백만|천만|만)\s*원\s*(?:~|이내|한도|까지)',
+                # 최대 00만원/억원
+                r'최대\s*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
+            ]
+
+            for pattern in budget_patterns:
+                match = re.search(pattern, page_text)
+                if match:
+                    amount = match.group(1).replace(',', '')
+                    unit = match.group(2)
+                    return f"{amount}{unit}원"
+
+            # fallback: 일반적인 금액 패턴
+            general_pattern = r'(\d+(?:\.\d+)?)\s*(억|백만|천만)\s*원'
+            match = re.search(general_pattern, page_text)
+            if match:
+                return f"{match.group(1)}{match.group(2)}원"
+
+            return '정보없음'
+
+        except requests.exceptions.Timeout:
+            logger.debug(f"K-Startup 상세페이지 타임아웃: {url}")
+            return '정보없음'
+        except Exception as e:
+            logger.debug(f"K-Startup 예산 크롤링 오류: {str(e)}")
+            return '정보없음'
+
     def _extract_organization(self, content: str) -> str:
         """
         과업개요에서 발주기관(주관기관) 정보 추출
+        kiwipiepy 형태소 분석 기반
         """
         if not content:
             return '정보없음'
@@ -382,8 +543,8 @@ class KStartupAPIClient:
         # HTML 태그 제거
         clean_content = self._clean_html(content)
 
-        # 발주기관 관련 패턴 검색
-        patterns = [
+        # 1단계: 레이블 기반 정규식 (명시적 표기가 있으면 우선 사용)
+        label_patterns = [
             r'주관기관[:\s]*([^\n,\.]+)',
             r'주관사[:\s]*([^\n,\.]+)',
             r'운영기관[:\s]*([^\n,\.]+)',
@@ -392,11 +553,53 @@ class KStartupAPIClient:
             r'사업주관[:\s]*([^\n,\.]+)'
         ]
 
-        for pattern in patterns:
+        for pattern in label_patterns:
             match = re.search(pattern, clean_content)
             if match:
                 org = match.group(1).strip()
-                # 너무 긴 경우 첫 50자만
-                return org[:50] if org else '정보없음'
+                if org and len(org) >= 2:
+                    return org[:50]
+
+        # 2단계: kiwipiepy 형태소 분석으로 기관명 추출
+        # 기관명 접미사 목록
+        ORG_SUFFIXES = ('센터', '진흥원', '재단', '협회', '공사', '공단', '원', '부', '청', '처', '실', '회', '단', '사')
+
+        # 첫 2문장만 분석 (발주기관은 보통 앞부분에 위치)
+        sentences = re.split(r'[.!?。]\s*', clean_content)
+        analysis_text = '. '.join(sentences[:2]) if sentences else clean_content[:200]
+
+        try:
+            kiwi = get_kiwi()
+            tokens = kiwi.tokenize(analysis_text)
+
+            # 명사(NNP, NNG) 연속 추출 → 기관명 후보
+            noun_chunks = []
+            current_chunk = []
+
+            for token in tokens:
+                # 고유명사(NNP), 일반명사(NNG), 외국어(SL), 한자(SH)
+                if token.tag in ('NNP', 'NNG', 'SL', 'SH'):
+                    current_chunk.append(token.form)
+                else:
+                    if current_chunk:
+                        noun_chunks.append(''.join(current_chunk))
+                        current_chunk = []
+
+            if current_chunk:
+                noun_chunks.append(''.join(current_chunk))
+
+            # 기관명 접미사로 끝나는 청크 찾기
+            for chunk in noun_chunks:
+                if len(chunk) >= 3 and chunk.endswith(ORG_SUFFIXES):
+                    # (사), (재) 등 법인 표기 앞에 있는 경우 함께 반환
+                    return chunk[:50]
+
+            # fallback: 첫 번째 긴 명사구 (4자 이상)
+            for chunk in noun_chunks:
+                if len(chunk) >= 4:
+                    return chunk[:50]
+
+        except Exception as e:
+            logger.warning(f"형태소 분석 실패: {str(e)}")
 
         return '정보없음'
