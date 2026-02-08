@@ -99,7 +99,7 @@ class SpreadsheetManager:
         """
         공고 데이터를 스프레드시트에 증분 업데이트
         - 신규 공고: append
-        - 기존 공고: 최종수정일시만 갱신
+        - 기존 공고: 전체 행 갱신 (등록일자는 기존 값 유지)
 
         Args:
             announcements: 공고 리스트
@@ -116,27 +116,36 @@ class SpreadsheetManager:
         include_budget = '예산' in headers
 
         try:
-            # 1) 기존 데이터에서 {공고ID: 행번호} 맵 생성
+            # 1) 기존 데이터에서 {공고ID: (행번호, 행데이터)} 맵 생성
             all_values = worksheet.get_all_values()
             id_col_idx = headers.index('공고ID')
+            reg_date_col_idx = headers.index('등록일자')
             existing_ids = {}
             for i, row in enumerate(all_values[1:], start=2):
                 if len(row) > id_col_idx and row[id_col_idx]:
-                    existing_ids[str(row[id_col_idx])] = i
+                    existing_ids[str(row[id_col_idx])] = {
+                        'row_num': i,
+                        'reg_date': row[reg_date_col_idx] if len(row) > reg_date_col_idx else ''
+                    }
 
             # 2) 신규 vs 기존 분류
             new_rows = []
             update_cells = []
-            now = datetime.now().strftime('%y-%m-%d')
             last_col = chr(ord('A') + len(headers) - 1)
 
             for announcement in announcements:
                 ann_id = str(announcement.get('id', ''))
                 if ann_id in existing_ids:
-                    row_num = existing_ids[ann_id]
+                    # 기존 공고: 전체 행 갱신 (등록일자는 기존 값 유지)
+                    info = existing_ids[ann_id]
+                    row_num = info['row_num']
+                    row_data = self._prepare_row_data(
+                        announcement, row_num, include_overview, include_budget,
+                        original_reg_date=info['reg_date']
+                    )
                     update_cells.append({
-                        'range': f'{last_col}{row_num}',
-                        'values': [[now]]
+                        'range': f'A{row_num}:{last_col}{row_num}',
+                        'values': [row_data]
                     })
                 else:
                     next_row = len(all_values) + len(new_rows) + 1
@@ -290,7 +299,7 @@ class SpreadsheetManager:
         worksheet.update(range_name='A1', values=rows, value_input_option='RAW')
         logger.info(f"✓ {sheet_name} 탭 업로드 완료: {len(businesses)}건")
 
-    def _prepare_row_data(self, announcement: Dict, row_number: int, include_overview: bool = False, include_budget: bool = True) -> List:
+    def _prepare_row_data(self, announcement: Dict, row_number: int, include_overview: bool = False, include_budget: bool = True, original_reg_date: str = None) -> List:
         """
         공고 데이터를 스프레드시트 행 형식으로 변환
 
@@ -299,6 +308,7 @@ class SpreadsheetManager:
             row_number: 추가될 행 번호
             include_overview: 과업개요 열 포함 여부 (K-Startup: True, 나라장터: False)
             include_budget: 예산 열 포함 여부 (나라장터: True, K-Startup: False)
+            original_reg_date: 기존 등록일자 (갱신 시 기존 값 유지)
 
         Returns:
             행 데이터 리스트
@@ -338,6 +348,8 @@ class SpreadsheetManager:
         if include_overview:
             row.append(announcement.get('overview', '')[:500])  # 과업개요 (500자 제한)
 
-        row.extend([reg_date, now])  # 등록일자, 업로드일자
+        # 갱신 시 기존 등록일자 유지, 신규 시 API 등록일자 사용
+        final_reg_date = original_reg_date if original_reg_date else reg_date
+        row.extend([final_reg_date, now])  # 등록일자, 업로드일자
 
         return row

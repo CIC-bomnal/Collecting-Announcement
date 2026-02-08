@@ -112,6 +112,40 @@ def filter_by_pdf_names(announcements: List[Dict], pdf_names: List[str], thresho
     return matched
 
 
+def filter_by_exclusion(announcements: List[Dict], exclusion_keywords: List[str]) -> List[Dict]:
+    """
+    금지어가 포함된 공고를 제외하는 필터 (육성기업 관점)
+
+    Args:
+        announcements: 공고 리스트
+        exclusion_keywords: 금지어 리스트
+
+    Returns:
+        금지어가 제외된 공고 리스트
+    """
+    if not exclusion_keywords:
+        logger.info("금지어가 비어있습니다. 전체 공고를 통과시킵니다.")
+        return list(announcements)
+
+    filtered = []
+
+    for announcement in announcements:
+        title = announcement.get('title', '').lower()
+        excluded = False
+
+        for keyword in exclusion_keywords:
+            if keyword.strip().lower() in title:
+                excluded = True
+                break
+
+        if not excluded:
+            filtered.append(announcement)
+
+    excluded_count = len(announcements) - len(filtered)
+    logger.info(f"금지어 필터링: {len(announcements)}건 → {len(filtered)}건 ({excluded_count}건 제외)")
+    return filtered
+
+
 def parse_date(date_str: str) -> date:
     """
     날짜 문자열을 date 객체로 변환

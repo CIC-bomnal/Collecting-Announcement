@@ -8,7 +8,7 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +22,14 @@ jobs:
 
       - name: Create .env
         run: |
-          cat << EOF > .env
+          cat << 'EOF' > .env
           NARA_API_KEY_DECODED=${{ secrets.NARA_API_KEY }}
           KSTARTUP_API_KEY_DECODED=${{ secrets.KSTARTUP_API_KEY }}
           GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
           KEYWORDS=${{ secrets.KEYWORDS }}
+          EXCLUSION_KEYWORDS=${{ secrets.EXCLUSION_KEYWORDS }}
           EOF
+          sed -i 's/^[[:space:]]*//' .env
 
       - name: Create credentials.json
         run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json

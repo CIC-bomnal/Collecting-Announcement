@@ -30,11 +30,15 @@ KEYWORDS_STR = os.getenv('KEYWORDS', '')
 KEYWORDS = [k.strip() for k in KEYWORDS_STR.split(',') if k.strip()]
 
 # 필터링 설정
-MIN_DAYS_REMAINING = int(os.getenv('MIN_DAYS_REMAINING', '14'))
+MIN_DAYS_REMAINING = int(os.getenv('MIN_DAYS_REMAINING', '7'))
 
 # 로그 설정
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_RETENTION_DAYS = int(os.getenv('LOG_RETENTION_DAYS', '30'))
+
+# 금지어 설정 (육성기업 관점 필터링)
+EXCLUSION_KEYWORDS_STR = os.getenv('EXCLUSION_KEYWORDS', '')
+EXCLUSION_KEYWORDS = [k.strip() for k in EXCLUSION_KEYWORDS_STR.split(',') if k.strip()]
 
 # API 공통 설정
 API_TIMEOUT = 10
@@ -45,6 +49,8 @@ API_RETRY_DELAY = 5
 SHEET_NAME_NARA = '나라장터'
 SHEET_NAME_KSTARTUP = 'K-Startup'
 SHEET_NAME_PDF = '2026 창업지원사업'
+SHEET_NAME_NARA_FILTERED = '나라장터(필터)'
+SHEET_NAME_KSTARTUP_FILTERED = 'K-Startup(필터)'
 
 # 스프레드시트 헤더 (탭별 상이)
 NARA_HEADERS = ['공고명', '공고ID', '발주기관', '마감일', '남은일수', '예산', '등록일자', '업로드일자']
@@ -64,7 +70,6 @@ def validate_config():
         'NARA_API_KEY': NARA_API_KEY,
         'KSTARTUP_API_KEY': KSTARTUP_API_KEY,
         'GOOGLE_SHEET_ID': GOOGLE_SHEET_ID,
-        'KEYWORDS': KEYWORDS,
     }
 
     missing_vars = [name for name, value in required_vars.items() if not value]
@@ -86,5 +91,6 @@ def validate_config():
     print(f"  - K-Startup API 키: {KSTARTUP_API_KEY[:20]}...")
     print(f"  - 스프레드시트 ID: {GOOGLE_SHEET_ID}")
     print(f"  - 키워드 개수: {len(KEYWORDS)}개")
+    print(f"  - 금지어 개수: {len(EXCLUSION_KEYWORDS)}개")
     print(f"  - 최소 남은 일수: {MIN_DAYS_REMAINING}일")
     print(f"  - 기준일: {BASE_DATE}")

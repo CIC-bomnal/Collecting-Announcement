@@ -1,6 +1,6 @@
 """
 공고 수집 시스템 메인 실행 파일
-마감일 2주 이상 남은 공고 수집 및 증분 업데이트
+마감일 7일 이상 남은 공고 수집 및 증분 업데이트
 """
 import time
 from datetime import datetime
@@ -9,7 +9,7 @@ from datetime import datetime
 import config
 from src.logger import setup_logger
 from src.api_client import NaraAPIClient, KStartupAPIClient
-from src.filter import filter_by_keyword, filter_by_deadline, filter_by_pdf_names
+from src.filter import filter_by_keyword, filter_by_deadline, filter_by_pdf_names, filter_by_exclusion
 from src.pdf_parser import parse_pdf
 from src.spreadsheet import SpreadsheetManager
 
@@ -55,8 +55,9 @@ def main():
         )
 
         # 4. 나라장터 데이터 수집 및 필터링
+        #    오늘 ~ 4개월 후만 조회 (52주 → 17주, GitHub Actions 타임아웃 방지)
         logger.info("\n[나라장터] 데이터 수집 시작...")
-        nara_announcements = nara_client.fetch_announcements(year=2026)
+        nara_announcements = nara_client.fetch_announcements()
 
         logger.info(f"[나라장터] 키워드 필터링 시작... (키워드 {len(config.KEYWORDS)}개)")
         nara_filtered_keyword = filter_by_keyword(nara_announcements, config.KEYWORDS)
@@ -106,14 +107,22 @@ def main():
         logger.info(f"[K-Startup] 최종: {len(kstartup_filtered_final)}건 "
                      f"(키워드 {len(kstartup_keyword_matched)}건 + PDF추가 {max(0, pdf_only)}건)")
 
-        # 7. 스프레드시트 업데이트
+        # 7. 금지어 필터링 (육성기업 관점)
+        nara_exclusion_filtered = []
+        kstartup_exclusion_filtered = []
+        if config.EXCLUSION_KEYWORDS:
+            logger.info(f"\n[금지어] 필터링 시작... (금지어 {len(config.EXCLUSION_KEYWORDS)}개)")
+            nara_exclusion_filtered = filter_by_exclusion(nara_filtered_final, config.EXCLUSION_KEYWORDS)
+            kstartup_exclusion_filtered = filter_by_exclusion(kstartup_filtered_final, config.EXCLUSION_KEYWORDS)
+
+        # 8. 스프레드시트 업데이트
         logger.info("\n스프레드시트 업데이트 시작...")
         sheet_manager = SpreadsheetManager(
             sheet_id=config.GOOGLE_SHEET_ID,
             credentials_file=config.GOOGLE_CREDENTIALS_FILE
         )
 
-        # 7-0. 중복 제거 (기존 데이터 정리)
+        # 8-0. 중복 제거 (기존 데이터 정리)
         logger.info("\n[중복 제거] 기존 데이터 정리...")
         nara_dedup = sheet_manager.deduplicate_sheet(
             sheet_name=config.SHEET_NAME_NARA,
@@ -126,7 +135,7 @@ def main():
         if nara_dedup or kstartup_dedup:
             logger.info(f"중복 제거 완료: 나라장터 {nara_dedup}건, K-Startup {kstartup_dedup}건 삭제")
 
-        # 7-1. 나라장터 탭 업데이트
+        # 8-1. 나라장터 탭 업데이트
         logger.info(f"\n[나라장터] 스프레드시트 업데이트... ({len(nara_filtered_final)}건)")
         nara_result = sheet_manager.update_announcements(
             nara_filtered_final,
@@ -134,7 +143,7 @@ def main():
             headers=config.NARA_HEADERS
         )
 
-        # 7-2. K-Startup 탭 업데이트
+        # 8-2. K-Startup 탭 업데이트
         logger.info(f"\n[K-Startup] 스프레드시트 업데이트... ({len(kstartup_filtered_final)}건)")
         kstartup_result = sheet_manager.update_announcements(
             kstartup_filtered_final,
@@ -142,7 +151,7 @@ def main():
             headers=config.KSTARTUP_HEADERS
         )
 
-        # 7-3. K-Startup 탭 PDF 매칭 행 하이라이팅
+        # 8-3. K-Startup 탭 PDF 매칭 행 하이라이팅
         pdf_matched_ids = [a['id'] for a in kstartup_filtered_final if a.get('pdf_matched')]
         if pdf_matched_ids:
             logger.info(f"\n[K-Startup] PDF 매칭 하이라이팅... ({len(pdf_matched_ids)}건)")
@@ -152,7 +161,7 @@ def main():
                 matched_ids=pdf_matched_ids
             )
 
-        # 7-4. "2026 창업지원사업" 탭 업로드
+        # 8-4. "2026 창업지원사업" 탭 업로드
         logger.info(f"\n[PDF] '2026 창업지원사업' 탭 업로드... ({len(pdf_businesses)}건)")
         sheet_manager.upload_pdf_data(
             businesses=pdf_businesses,
@@ -160,7 +169,33 @@ def main():
             headers=config.PDF_HEADERS
         )
 
-        # 8. 완료
+        # 8-5. 금지어 필터 탭 업데이트
+        if config.EXCLUSION_KEYWORDS:
+            logger.info(f"\n[금지어] 나라장터(필터) 탭 업데이트... ({len(nara_exclusion_filtered)}건)")
+            sheet_manager.update_announcements(
+                nara_exclusion_filtered,
+                sheet_name=config.SHEET_NAME_NARA_FILTERED,
+                headers=config.NARA_HEADERS
+            )
+
+            logger.info(f"\n[금지어] K-Startup(필터) 탭 업데이트... ({len(kstartup_exclusion_filtered)}건)")
+            sheet_manager.update_announcements(
+                kstartup_exclusion_filtered,
+                sheet_name=config.SHEET_NAME_KSTARTUP_FILTERED,
+                headers=config.KSTARTUP_HEADERS
+            )
+
+            # 금지어 필터 탭에도 PDF 매칭 하이라이팅 적용
+            filtered_pdf_ids = [a['id'] for a in kstartup_exclusion_filtered if a.get('pdf_matched')]
+            if filtered_pdf_ids:
+                logger.info(f"\n[금지어] K-Startup(필터) PDF 하이라이팅... ({len(filtered_pdf_ids)}건)")
+                sheet_manager.highlight_rows(
+                    sheet_name=config.SHEET_NAME_KSTARTUP_FILTERED,
+                    headers=config.KSTARTUP_HEADERS,
+                    matched_ids=filtered_pdf_ids
+                )
+
+        # 9. 완료
         elapsed_time = time.time() - start_time
         total_new = nara_result['new'] + kstartup_result['new']
         total_updated = nara_result['updated'] + kstartup_result['updated']
@@ -178,6 +213,8 @@ def main():
         print(f"  - 나라장터: 신규 {nara_result['new']}건, 갱신 {nara_result['updated']}건")
         print(f"  - K-Startup: 신규 {kstartup_result['new']}건, 갱신 {kstartup_result['updated']}건")
         print(f"  - 총 신규 {total_new}건, 갱신 {total_updated}건")
+        if config.EXCLUSION_KEYWORDS:
+            print(f"  - 금지어 필터: 나라장터 {len(nara_exclusion_filtered)}건, K-Startup {len(kstartup_exclusion_filtered)}건")
         print(f"  - 소요 시간: {elapsed_time:.1f}초")
         print("=" * 60)
         print(f"\n스프레드시트 확인: https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}")

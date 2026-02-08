@@ -36,37 +36,39 @@ class NaraAPIClient:
         self.max_retries = 3
         self.retry_delay = 5
 
-    def fetch_announcements(self, year: int = 2026) -> List[Dict]:
+    def fetch_announcements(self, start_date_override=None, end_date_override=None) -> List[Dict]:
         """
         나라장터에서 공고 데이터 수집
+        기본: 오늘 ~ 4개월 후 (약 17주)
 
         Args:
-            year: 수집할 연도
+            start_date_override: 시작일 (datetime, 기본: 오늘)
+            end_date_override: 종료일 (datetime, 기본: 오늘+120일)
 
         Returns:
             공고 리스트
         """
         all_announcements = []
 
-        # 주 단위(7일)로 데이터 수집 (API 제한: 999건/요청, 하루 평균 150건)
-        # 1년 = 약 52주
         from datetime import datetime, timedelta
 
-        start_of_year = datetime(year, 1, 1)
-        end_of_year = datetime(year, 12, 31, 23, 59, 59)
+        fetch_start = start_date_override or datetime.now()
+        fetch_end = end_date_override or (datetime.now() + timedelta(days=120))
 
-        current_date = start_of_year
+        current_date = fetch_start
         week_num = 1
 
-        while current_date <= end_of_year:
+        logger.info(f"나라장터 조회 범위: {fetch_start.strftime('%Y-%m-%d')} ~ {fetch_end.strftime('%Y-%m-%d')}")
+
+        while current_date <= fetch_end:
             # 주 단위 시작일과 종료일 계산
             week_start = current_date
-            week_end = min(current_date + timedelta(days=6, hours=23, minutes=59, seconds=59), end_of_year)
+            week_end = min(current_date + timedelta(days=6, hours=23, minutes=59, seconds=59), fetch_end)
 
             start_date = week_start.strftime('%Y%m%d%H%M')
             end_date = week_end.strftime('%Y%m%d%H%M')
 
-            logger.info(f"나라장터 API 호출: {year}년 {week_num}주차 ({week_start.strftime('%m/%d')}~{week_end.strftime('%m/%d')})")
+            logger.info(f"나라장터 API 호출: {week_num}주차 ({week_start.strftime('%m/%d')}~{week_end.strftime('%m/%d')})")
 
             page = 1
             while True:
@@ -99,7 +101,7 @@ class NaraAPIClient:
                     page += 1
 
                 except Exception as e:
-                    logger.error(f"나라장터 API 오류 ({year}년 {week_num}주차, 페이지 {page}): {str(e)}")
+                    logger.error(f"나라장터 API 오류 ({week_num}주차, 페이지 {page}): {str(e)}")
                     break
 
             # 다음 주로 이동
