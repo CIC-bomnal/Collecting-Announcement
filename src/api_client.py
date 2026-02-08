@@ -9,7 +9,6 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 
-from bs4 import BeautifulSoup
 from kiwipiepy import Kiwi
 
 
@@ -193,8 +192,7 @@ class NaraAPIClient:
                     'deadline': item.get('bidClseDate', ''),  # YYYY-MM-DD
                     'budget': item.get('asignBdgtAmt') or item.get('presmptPrce') or '정보없음',
                     'link': item.get('bidNtceUrl', ''),
-                    'overview': '',  # 나라장터는 과업개요 제공 안 함
-                    'summary': '',
+                    'registration_date': item.get('bidNtceDate', ''),  # 공고등록일
                     'source': 'nara'
                 }
 
@@ -324,15 +322,21 @@ class KStartupAPIClient:
                 # 발주기관을 과업개요에서 추출
                 organization = self._extract_organization(pbanc_ctnt)
 
+                # 접수시작일을 등록일자로 사용
+                reg_date_str = item.get('pbanc_rcpt_bgng_dt', '')
+                if reg_date_str and len(reg_date_str) >= 8 and reg_date_str[:8].isdigit():
+                    registration_date = f"{reg_date_str[:4]}-{reg_date_str[4:6]}-{reg_date_str[6:8]}"
+                else:
+                    registration_date = ''
+
                 parsed_item = {
                     'id': announcement_id,
                     'title': item.get('biz_pbanc_nm', ''),
                     'organization': organization,  # 과업개요에서 추출
                     'deadline': deadline,
-                    'budget': '',  # K-Startup은 예산 수집 안 함
                     'link': full_url,
                     'overview': overview[:500] if overview else '',  # 500자로 제한
-                    'summary': item.get('supt_biz_clsfc', ''),  # 지원 분야를 요약으로 사용
+                    'registration_date': registration_date,
                     'source': 'kstartup'
                 }
 
@@ -364,99 +368,6 @@ class KStartupAPIClient:
         # 연속된 공백/줄바꿈 정리
         clean_text = re.sub(r'\s+', ' ', clean_text)
         return clean_text.strip()
-
-    def _extract_budget(self, content: str) -> str:
-        """
-        내용에서 예산 정보 추출
-        """
-        if not content:
-            return '정보없음'
-
-        # 예산 관련 패턴 검색
-        patterns = [
-            r'(\d{1,3}(?:,\d{3})*)\s*(?:만|억|천만)?\s*원',
-            r'예산[:\s]*(\d{1,3}(?:,\d{3})*)\s*(?:만|억|천만)?\s*원',
-            r'지원금[:\s]*(\d{1,3}(?:,\d{3})*)\s*(?:만|억|천만)?\s*원'
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, content)
-            if match:
-                return match.group(0)
-
-        return '정보없음'
-
-    def fetch_budget_from_page(self, pbanc_sn: str) -> str:
-        """
-        K-Startup 상세페이지에서 예산 정보 크롤링
-
-        Args:
-            pbanc_sn: 공고 고유번호
-
-        Returns:
-            예산 문자열 또는 '정보없음'
-        """
-        if not pbanc_sn:
-            return '정보없음'
-
-        url = f"https://www.k-startup.go.kr/web/contents/bizpbanc-ongoing.do?schM=view&pbancSn={pbanc_sn}"
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-
-        try:
-            response = requests.get(url, headers=headers, timeout=15)
-            response.encoding = 'utf-8'
-
-            if response.status_code != 200:
-                logger.debug(f"K-Startup 상세페이지 접근 실패: {url} (status: {response.status_code})")
-                return '정보없음'
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # 지원내용/지원규모 섹션 찾기
-            page_text = soup.get_text()
-
-            # 예산 추출 패턴들 (레이블 컨텍스트 우선)
-            budget_patterns = [
-                # 지원규모: 1억원 이내, 지원규모: 최대 5,000만원
-                r'지원규모[:\s]*(?:최대\s*)?(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-                # 지원예산: 정부지원사업비 5억원
-                r'지원예산[:\s]*[^\d]*?(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-                # 총 사업비: 00억원
-                r'총\s*사업비[:\s]*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-                # 사업비 지원: 00만원
-                r'사업비\s*지원[:\s]*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-                # 국비 14억원 내외
-                r'국비\s*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-                # 00억원 이내/내외/한도/까지
-                r'(\d+(?:\.\d+)?)\s*(억|백만|천만|만)\s*원\s*(?:~|이내|내외|한도|까지)',
-                # 최대 00만원/억원
-                r'최대\s*(\d+(?:\.\d+)?(?:,\d+)?)\s*(억|백만|천만|만)\s*원',
-            ]
-
-            for pattern in budget_patterns:
-                match = re.search(pattern, page_text)
-                if match:
-                    amount = match.group(1).replace(',', '')
-                    unit = match.group(2)
-                    return f"{amount}{unit}원"
-
-            # fallback: 일반적인 금액 패턴
-            general_pattern = r'(\d+(?:\.\d+)?)\s*(억|백만|천만)\s*원'
-            match = re.search(general_pattern, page_text)
-            if match:
-                return f"{match.group(1)}{match.group(2)}원"
-
-            return '정보없음'
-
-        except requests.exceptions.Timeout:
-            logger.debug(f"K-Startup 상세페이지 타임아웃: {url}")
-            return '정보없음'
-        except Exception as e:
-            logger.debug(f"K-Startup 예산 크롤링 오류: {str(e)}")
-            return '정보없음'
 
     def _extract_organization(self, content: str) -> str:
         """

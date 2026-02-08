@@ -81,18 +81,6 @@ def main():
             config.BASE_DATE
         )
 
-        # 5-1. K-Startup 예산 웹 스크래핑 (필터링 통과 공고만)
-        if kstartup_filtered_final:
-            logger.info(f"[K-Startup] 예산 크롤링 시작... ({len(kstartup_filtered_final)}건)")
-            for i, ann in enumerate(kstartup_filtered_final):
-                if ann.get('id') and (not ann.get('budget') or ann.get('budget') == '정보없음'):
-                    budget = kstartup_client.fetch_budget_from_page(ann['id'])
-                    ann['budget'] = budget
-                    if (i + 1) % 10 == 0:
-                        logger.debug(f"  예산 크롤링 진행: {i + 1}/{len(kstartup_filtered_final)}건")
-                    time.sleep(0.5)  # 서버 부하 방지
-            logger.info(f"[K-Startup] 예산 크롤링 완료")
-
         # 6. 스프레드시트 업데이트
         logger.info("\n스프레드시트 업데이트 시작...")
         sheet_manager = SpreadsheetManager(

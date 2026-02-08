@@ -113,7 +113,7 @@ class SpreadsheetManager:
         self.ensure_headers(worksheet, headers)
 
         include_overview = '과업개요' in headers
-        include_summary = '요약' in headers
+        include_budget = '예산' in headers
 
         try:
             # 1) 기존 데이터에서 {공고ID: 행번호} 맵 생성
@@ -127,7 +127,7 @@ class SpreadsheetManager:
             # 2) 신규 vs 기존 분류
             new_rows = []
             update_cells = []
-            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            now = datetime.now().strftime('%y-%m-%d')
             last_col = chr(ord('A') + len(headers) - 1)
 
             for announcement in announcements:
@@ -140,7 +140,7 @@ class SpreadsheetManager:
                     })
                 else:
                     next_row = len(all_values) + len(new_rows) + 1
-                    row_data = self._prepare_row_data(announcement, next_row, include_overview, include_summary)
+                    row_data = self._prepare_row_data(announcement, next_row, include_overview, include_budget)
                     new_rows.append(row_data)
 
             # 3) 일괄 업데이트
@@ -198,7 +198,7 @@ class SpreadsheetManager:
 
         return dup_count
 
-    def _prepare_row_data(self, announcement: Dict, row_number: int, include_overview: bool = True, include_summary: bool = True) -> List:
+    def _prepare_row_data(self, announcement: Dict, row_number: int, include_overview: bool = False, include_budget: bool = True) -> List:
         """
         공고 데이터를 스프레드시트 행 형식으로 변환
 
@@ -206,7 +206,7 @@ class SpreadsheetManager:
             announcement: 공고 데이터
             row_number: 추가될 행 번호
             include_overview: 과업개요 열 포함 여부 (K-Startup: True, 나라장터: False)
-            include_summary: 요약 열 포함 여부 (K-Startup: True, 나라장터: False)
+            include_budget: 예산 열 포함 여부 (나라장터: True, K-Startup: False)
 
         Returns:
             행 데이터 리스트
@@ -216,8 +216,18 @@ class SpreadsheetManager:
         link = announcement.get('link', '')
         announcement_title_with_link = f'=HYPERLINK("{link}", "{title}")'
 
-        # 현재 시각
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        # 날짜 형식: YY-MM-DD
+        now = datetime.now().strftime('%y-%m-%d')
+
+        # 마감일 YY-MM-DD 변환
+        deadline = announcement.get('deadline', '')
+        if deadline and len(deadline) >= 10:
+            deadline = deadline[2:]  # YYYY-MM-DD → YY-MM-DD
+
+        # 등록일자 YY-MM-DD 변환 (공고가 등록된 날짜)
+        reg_date = announcement.get('registration_date', '')
+        if reg_date and len(reg_date) >= 10:
+            reg_date = reg_date[2:]  # YYYY-MM-DD → YY-MM-DD
 
         # 남은일수 수식: 마감일(D열) - TODAY()
         remaining_days_formula = f'=D{row_number}-TODAY()'
@@ -226,17 +236,16 @@ class SpreadsheetManager:
             announcement_title_with_link,           # 공고명 (하이퍼링크)
             announcement.get('id', ''),             # 공고ID
             announcement.get('organization', ''),   # 발주기관
-            announcement.get('deadline', ''),       # 마감일
+            deadline,                               # 마감일 (YY-MM-DD)
             remaining_days_formula,                 # 남은일수 (수식)
-            str(announcement.get('budget', '')),    # 예산
         ]
+
+        if include_budget:
+            row.append(str(announcement.get('budget', '')))    # 예산
 
         if include_overview:
             row.append(announcement.get('overview', '')[:500])  # 과업개요 (500자 제한)
 
-        if include_summary:
-            row.append(announcement.get('summary', '')[:100])  # 요약 (100자 제한)
-
-        row.extend([now, now])  # 등록일시, 최종수정일시
+        row.extend([reg_date, now])  # 등록일자, 업로드일자
 
         return row
