@@ -9,7 +9,8 @@ from datetime import datetime
 import config
 from src.logger import setup_logger
 from src.api_client import NaraAPIClient, KStartupAPIClient
-from src.filter import filter_by_keyword, filter_by_deadline
+from src.filter import filter_by_keyword, filter_by_deadline, filter_by_pdf_names
+from src.pdf_parser import parse_pdf
 from src.spreadsheet import SpreadsheetManager
 
 
@@ -67,28 +68,52 @@ def main():
             config.BASE_DATE
         )
 
-        # 5. K-Startup 데이터 수집 및 필터링
+        # 5. PDF 사업명 파싱 (K-Startup 매칭용)
+        logger.info("\n[PDF] 창업지원사업 안내서 파싱...")
+        pdf_businesses = parse_pdf(config.PDF_PATH)
+        pdf_names = [b['name'] for b in pdf_businesses]
+        logger.info(f"[PDF] {len(pdf_names)}개 사업명 추출 완료")
+
+        # 6. K-Startup 데이터 수집 및 필터링
+        #    흐름: API 전체 fetch → 마감일 필터 → (키워드 OR PDF 사업명) 매칭
         logger.info("\n[K-Startup] 데이터 수집 시작...")
         kstartup_announcements = kstartup_client.fetch_announcements(year=2026)
 
-        logger.info(f"[K-Startup] 키워드 필터링 시작... (키워드 {len(config.KEYWORDS)}개)")
-        kstartup_filtered_keyword = filter_by_keyword(kstartup_announcements, config.KEYWORDS)
-
         logger.info(f"[K-Startup] 마감일 필터링 시작...")
-        kstartup_filtered_final = filter_by_deadline(
-            kstartup_filtered_keyword,
+        kstartup_deadline_filtered = filter_by_deadline(
+            kstartup_announcements,
             config.MIN_DAYS_REMAINING,
             config.BASE_DATE
         )
 
-        # 6. 스프레드시트 업데이트
+        logger.info(f"[K-Startup] 키워드 필터링... (키워드 {len(config.KEYWORDS)}개)")
+        kstartup_keyword_matched = filter_by_keyword(kstartup_deadline_filtered, config.KEYWORDS)
+
+        logger.info(f"[K-Startup] PDF 사업명 매칭... (사업명 {len(pdf_names)}개, 임계값 {config.MATCH_THRESHOLD})")
+        kstartup_pdf_matched = filter_by_pdf_names(
+            kstartup_deadline_filtered, pdf_names, config.MATCH_THRESHOLD
+        )
+
+        # OR 합산 (키워드 매칭 ∪ PDF 매칭)
+        seen_ids = set()
+        kstartup_filtered_final = []
+        for a in kstartup_keyword_matched + kstartup_pdf_matched:
+            if a['id'] not in seen_ids:
+                seen_ids.add(a['id'])
+                kstartup_filtered_final.append(a)
+
+        pdf_only = len(kstartup_filtered_final) - len(kstartup_keyword_matched)
+        logger.info(f"[K-Startup] 최종: {len(kstartup_filtered_final)}건 "
+                     f"(키워드 {len(kstartup_keyword_matched)}건 + PDF추가 {max(0, pdf_only)}건)")
+
+        # 7. 스프레드시트 업데이트
         logger.info("\n스프레드시트 업데이트 시작...")
         sheet_manager = SpreadsheetManager(
             sheet_id=config.GOOGLE_SHEET_ID,
             credentials_file=config.GOOGLE_CREDENTIALS_FILE
         )
 
-        # 6-0. 중복 제거 (기존 데이터 정리)
+        # 7-0. 중복 제거 (기존 데이터 정리)
         logger.info("\n[중복 제거] 기존 데이터 정리...")
         nara_dedup = sheet_manager.deduplicate_sheet(
             sheet_name=config.SHEET_NAME_NARA,
@@ -101,7 +126,7 @@ def main():
         if nara_dedup or kstartup_dedup:
             logger.info(f"중복 제거 완료: 나라장터 {nara_dedup}건, K-Startup {kstartup_dedup}건 삭제")
 
-        # 6-1. 나라장터 탭 업데이트
+        # 7-1. 나라장터 탭 업데이트
         logger.info(f"\n[나라장터] 스프레드시트 업데이트... ({len(nara_filtered_final)}건)")
         nara_result = sheet_manager.update_announcements(
             nara_filtered_final,
@@ -109,7 +134,7 @@ def main():
             headers=config.NARA_HEADERS
         )
 
-        # 6-2. K-Startup 탭 업데이트
+        # 7-2. K-Startup 탭 업데이트
         logger.info(f"\n[K-Startup] 스프레드시트 업데이트... ({len(kstartup_filtered_final)}건)")
         kstartup_result = sheet_manager.update_announcements(
             kstartup_filtered_final,
@@ -117,7 +142,25 @@ def main():
             headers=config.KSTARTUP_HEADERS
         )
 
-        # 7. 완료
+        # 7-3. K-Startup 탭 PDF 매칭 행 하이라이팅
+        pdf_matched_ids = [a['id'] for a in kstartup_filtered_final if a.get('pdf_matched')]
+        if pdf_matched_ids:
+            logger.info(f"\n[K-Startup] PDF 매칭 하이라이팅... ({len(pdf_matched_ids)}건)")
+            sheet_manager.highlight_rows(
+                sheet_name=config.SHEET_NAME_KSTARTUP,
+                headers=config.KSTARTUP_HEADERS,
+                matched_ids=pdf_matched_ids
+            )
+
+        # 7-4. "2026 창업지원사업" 탭 업로드
+        logger.info(f"\n[PDF] '2026 창업지원사업' 탭 업로드... ({len(pdf_businesses)}건)")
+        sheet_manager.upload_pdf_data(
+            businesses=pdf_businesses,
+            sheet_name=config.SHEET_NAME_PDF,
+            headers=config.PDF_HEADERS
+        )
+
+        # 8. 완료
         elapsed_time = time.time() - start_time
         total_new = nara_result['new'] + kstartup_result['new']
         total_updated = nara_result['updated'] + kstartup_result['updated']

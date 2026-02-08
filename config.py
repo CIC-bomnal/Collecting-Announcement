@@ -44,10 +44,16 @@ API_RETRY_DELAY = 5
 # 시트 이름
 SHEET_NAME_NARA = '나라장터'
 SHEET_NAME_KSTARTUP = 'K-Startup'
+SHEET_NAME_PDF = '2026 창업지원사업'
 
 # 스프레드시트 헤더 (탭별 상이)
 NARA_HEADERS = ['공고명', '공고ID', '발주기관', '마감일', '남은일수', '예산', '등록일자', '업로드일자']
 KSTARTUP_HEADERS = ['공고명', '공고ID', '발주기관', '마감일', '남은일수', '과업개요', '등록일자', '업로드일자']
+PDF_HEADERS = ['사업명', '구분(주관)', '구분(성격)', '예정공고시기', '페이지']
+
+# PDF 설정
+PDF_PATH = os.path.join(os.path.dirname(__file__), 'Public_Announcement_guidebook.pdf')
+MATCH_THRESHOLD = 60  # rapidfuzz token_set_ratio 임계값
 
 
 def validate_config():
