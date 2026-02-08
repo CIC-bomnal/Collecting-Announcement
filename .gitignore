@@ -1,0 +1,19 @@
+# 환경변수 (API 키 포함)
+.env
+
+# Google 서비스 계정 키
+credentials.json
+
+# Python
+__pycache__/
+*.pyc
+
+# 로그
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

@@ -85,7 +85,8 @@ class SpreadsheetManager:
 
             if not existing_headers or existing_headers != headers:
                 # 헤더 업데이트
-                worksheet.update('A1:J1', [headers], value_input_option='RAW')
+                last_col = chr(ord('A') + len(headers) - 1)
+                worksheet.update(f'A1:{last_col}1', [headers], value_input_option='RAW')
                 logger.info(f"✓ 헤더 설정 완료: {len(headers)}개 컬럼")
             else:
                 logger.info(f"✓ 헤더 이미 존재")
@@ -96,7 +97,9 @@ class SpreadsheetManager:
 
     def update_announcements(self, announcements: List[Dict], sheet_name: str, headers: List[str]) -> Dict:
         """
-        공고 데이터를 스프레드시트에 업데이트
+        공고 데이터를 스프레드시트에 증분 업데이트
+        - 신규 공고: append
+        - 기존 공고: 최종수정일시만 갱신
 
         Args:
             announcements: 공고 리스트
@@ -104,49 +107,109 @@ class SpreadsheetManager:
             headers: 헤더 리스트
 
         Returns:
-            {'new': 신규 추가 건수}
+            {'new': 신규 추가 건수, 'updated': 갱신 건수}
         """
         worksheet = self.get_or_create_worksheet(sheet_name)
         self.ensure_headers(worksheet, headers)
 
-        new_count = 0
+        include_overview = '과업개요' in headers
+        include_summary = '요약' in headers
 
-        # Phase 1이므로 중복 체크 없이 모두 추가
         try:
-            # 시트를 한 번만 읽어서 현재 행 개수 확인
-            current_rows = len(worksheet.get_all_values())
+            # 1) 기존 데이터에서 {공고ID: 행번호} 맵 생성
+            all_values = worksheet.get_all_values()
+            id_col_idx = headers.index('공고ID')
+            existing_ids = {}
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) > id_col_idx and row[id_col_idx]:
+                    existing_ids[str(row[id_col_idx])] = i
 
-            # 모든 행 데이터를 메모리에서 준비
-            all_rows = []
-            for i, announcement in enumerate(announcements):
-                next_row = current_rows + i + 1  # 메모리에서 행 번호 계산
-                row_data = self._prepare_row_data(announcement, next_row)
-                all_rows.append(row_data)
+            # 2) 신규 vs 기존 분류
+            new_rows = []
+            update_cells = []
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            last_col = chr(ord('A') + len(headers) - 1)
 
-            # 모든 행을 한 번에 추가 (일괄 업데이트)
-            if all_rows:
-                worksheet.append_rows(all_rows, value_input_option='USER_ENTERED')
-                new_count = len(all_rows)
-                logger.info(f"✓ {sheet_name} 탭 일괄 업데이트 완료: 신규 {new_count}건")
-            else:
-                logger.info(f"✓ {sheet_name} 탭: 추가할 데이터 없음")
+            for announcement in announcements:
+                ann_id = str(announcement.get('id', ''))
+                if ann_id in existing_ids:
+                    row_num = existing_ids[ann_id]
+                    update_cells.append({
+                        'range': f'{last_col}{row_num}',
+                        'values': [[now]]
+                    })
+                else:
+                    next_row = len(all_values) + len(new_rows) + 1
+                    row_data = self._prepare_row_data(announcement, next_row, include_overview, include_summary)
+                    new_rows.append(row_data)
+
+            # 3) 일괄 업데이트
+            if new_rows:
+                worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            if update_cells:
+                worksheet.batch_update(update_cells, value_input_option='USER_ENTERED')
+
+            logger.info(f"✓ {sheet_name} 탭 업데이트 완료: 신규 {len(new_rows)}건, 갱신 {len(update_cells)}건")
 
         except Exception as e:
-            logger.error(f"일괄 업데이트 오류: {str(e)}")
+            logger.error(f"업데이트 오류: {str(e)}")
             raise
 
-        return {'new': new_count}
+        return {'new': len(new_rows), 'updated': len(update_cells)}
 
-    def _prepare_row_data(self, announcement: Dict, row_number: int) -> List:
+    def deduplicate_sheet(self, sheet_name: str, headers: List[str]) -> int:
+        """
+        공고ID 기준 중복 행 제거 (첫 번째 행만 유지)
+        메모리에서 중복 제거 후 시트 전체를 다시 쓰는 방식 (API 호출 최소화)
+
+        Args:
+            sheet_name: 시트 이름
+            headers: 헤더 리스트
+
+        Returns:
+            삭제된 행 수
+        """
+        worksheet = self.get_or_create_worksheet(sheet_name)
+        all_values = worksheet.get_all_values()
+
+        if len(all_values) <= 1:
+            return 0
+
+        id_col_idx = headers.index('공고ID')
+        seen_ids = set()
+        unique_rows = [all_values[0]]  # 헤더 유지
+        dup_count = 0
+
+        for row in all_values[1:]:
+            ann_id = row[id_col_idx] if len(row) > id_col_idx else ''
+            if not ann_id or ann_id not in seen_ids:
+                seen_ids.add(ann_id)
+                unique_rows.append(row)
+            else:
+                dup_count += 1
+
+        if dup_count == 0:
+            return 0
+
+        # 시트 전체를 중복 제거된 데이터로 교체 (API 호출 2회: clear + update)
+        worksheet.clear()
+        worksheet.update(range_name='A1', values=unique_rows, value_input_option='USER_ENTERED')
+        logger.info(f"✓ {sheet_name} 탭 중복 제거: {dup_count}건 삭제 ({len(all_values)-1}행 → {len(unique_rows)-1}행)")
+
+        return dup_count
+
+    def _prepare_row_data(self, announcement: Dict, row_number: int, include_overview: bool = True, include_summary: bool = True) -> List:
         """
         공고 데이터를 스프레드시트 행 형식으로 변환
 
         Args:
             announcement: 공고 데이터
             row_number: 추가될 행 번호
+            include_overview: 과업개요 열 포함 여부 (K-Startup: True, 나라장터: False)
+            include_summary: 요약 열 포함 여부 (K-Startup: True, 나라장터: False)
 
         Returns:
-            [공고명(하이퍼링크), 공고ID, 발주기관, 마감일, 남은일수(수식), 예산, 과업개요, 요약, 등록일시, 최종수정일시]
+            행 데이터 리스트
         """
         # 공고명에 하이퍼링크 삽입
         title = announcement.get('title', '').replace('"', '""')  # 쌍따옴표 이스케이프
@@ -157,18 +220,23 @@ class SpreadsheetManager:
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         # 남은일수 수식: 마감일(D열) - TODAY()
-        # 예: =D2-TODAY(), =D3-TODAY(), ...
         remaining_days_formula = f'=D{row_number}-TODAY()'
 
-        return [
+        row = [
             announcement_title_with_link,           # 공고명 (하이퍼링크)
             announcement.get('id', ''),             # 공고ID
             announcement.get('organization', ''),   # 발주기관
             announcement.get('deadline', ''),       # 마감일
             remaining_days_formula,                 # 남은일수 (수식)
             str(announcement.get('budget', '')),    # 예산
-            announcement.get('overview', '')[:500], # 과업개요 (500자 제한)
-            announcement.get('summary', '')[:100],  # 요약 (100자 제한)
-            now,                                    # 등록일시
-            now                                     # 최종수정일시
         ]
+
+        if include_overview:
+            row.append(announcement.get('overview', '')[:500])  # 과업개요 (500자 제한)
+
+        if include_summary:
+            row.append(announcement.get('summary', '')[:100])  # 요약 (100자 제한)
+
+        row.extend([now, now])  # 등록일시, 최종수정일시
+
+        return row

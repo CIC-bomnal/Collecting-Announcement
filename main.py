@@ -1,6 +1,6 @@
 """
-Phase 1: 공고 수집 시스템 메인 실행 파일
-2026-02-01 기준 마감일 2주 이상 남은 공고 초기 수집
+공고 수집 시스템 메인 실행 파일
+마감일 2주 이상 남은 공고 수집 및 증분 업데이트
 """
 import time
 from datetime import datetime
@@ -15,10 +15,11 @@ from src.spreadsheet import SpreadsheetManager
 
 def main():
     """
-    Phase 1 메인 실행 함수
+    메인 실행 함수
+    - API에서 공고 수집 → 키워드/마감일 필터링 → 스프레드시트 증분 업데이트
     """
     print("=" * 60)
-    print("공고 수집 시스템 - Phase 1: 초기 데이터 수집")
+    print("공고 수집 시스템 - 데이터 수집 및 업데이트")
     print("=" * 60)
     print()
 
@@ -33,8 +34,8 @@ def main():
     # 2. 로거 초기화
     logger = setup_logger(config.LOG_LEVEL)
     logger.info("=" * 60)
-    logger.info("Phase 1: 초기 데이터 수집 시작")
-    logger.info(f"기준일: {config.PHASE1_BASE_DATE}")
+    logger.info("공고 데이터 수집 시작")
+    logger.info(f"기준일: {config.BASE_DATE}")
     logger.info(f"최소 남은 일수: {config.MIN_DAYS_REMAINING}일")
     logger.info("=" * 60)
 
@@ -63,20 +64,8 @@ def main():
         nara_filtered_final = filter_by_deadline(
             nara_filtered_keyword,
             config.MIN_DAYS_REMAINING,
-            config.PHASE1_BASE_DATE
+            config.BASE_DATE
         )
-
-        # 4-1. 나라장터 과업개요 웹 스크래핑 (필터링 통과 공고만)
-        if nara_filtered_final:
-            logger.info(f"[나라장터] 과업개요 크롤링 시작... ({len(nara_filtered_final)}건)")
-            for i, ann in enumerate(nara_filtered_final):
-                if ann.get('link') and not ann.get('overview'):
-                    overview = nara_client.fetch_overview_from_page(ann['link'])
-                    ann['overview'] = overview
-                    if (i + 1) % 10 == 0:
-                        logger.debug(f"  과업개요 크롤링 진행: {i + 1}/{len(nara_filtered_final)}건")
-                    time.sleep(0.5)  # 서버 부하 방지
-            logger.info(f"[나라장터] 과업개요 크롤링 완료")
 
         # 5. K-Startup 데이터 수집 및 필터링
         logger.info("\n[K-Startup] 데이터 수집 시작...")
@@ -89,7 +78,7 @@ def main():
         kstartup_filtered_final = filter_by_deadline(
             kstartup_filtered_keyword,
             config.MIN_DAYS_REMAINING,
-            config.PHASE1_BASE_DATE
+            config.BASE_DATE
         )
 
         # 5-1. K-Startup 예산 웹 스크래핑 (필터링 통과 공고만)
@@ -111,37 +100,53 @@ def main():
             credentials_file=config.GOOGLE_CREDENTIALS_FILE
         )
 
-        # 나라장터 탭 업데이트
+        # 6-0. 중복 제거 (기존 데이터 정리)
+        logger.info("\n[중복 제거] 기존 데이터 정리...")
+        nara_dedup = sheet_manager.deduplicate_sheet(
+            sheet_name=config.SHEET_NAME_NARA,
+            headers=config.NARA_HEADERS
+        )
+        kstartup_dedup = sheet_manager.deduplicate_sheet(
+            sheet_name=config.SHEET_NAME_KSTARTUP,
+            headers=config.KSTARTUP_HEADERS
+        )
+        if nara_dedup or kstartup_dedup:
+            logger.info(f"중복 제거 완료: 나라장터 {nara_dedup}건, K-Startup {kstartup_dedup}건 삭제")
+
+        # 6-1. 나라장터 탭 업데이트
         logger.info(f"\n[나라장터] 스프레드시트 업데이트... ({len(nara_filtered_final)}건)")
         nara_result = sheet_manager.update_announcements(
             nara_filtered_final,
             sheet_name=config.SHEET_NAME_NARA,
-            headers=config.SPREADSHEET_HEADERS
+            headers=config.NARA_HEADERS
         )
 
-        # K-Startup 탭 업데이트
+        # 6-2. K-Startup 탭 업데이트
         logger.info(f"\n[K-Startup] 스프레드시트 업데이트... ({len(kstartup_filtered_final)}건)")
         kstartup_result = sheet_manager.update_announcements(
             kstartup_filtered_final,
             sheet_name=config.SHEET_NAME_KSTARTUP,
-            headers=config.SPREADSHEET_HEADERS
+            headers=config.KSTARTUP_HEADERS
         )
 
         # 7. 완료
         elapsed_time = time.time() - start_time
+        total_new = nara_result['new'] + kstartup_result['new']
+        total_updated = nara_result['updated'] + kstartup_result['updated']
+
         logger.info("\n" + "=" * 60)
-        logger.info("Phase 1 완료!")
+        logger.info("수집 완료!")
         logger.info(f"소요 시간: {elapsed_time:.1f}초")
-        logger.info(f"나라장터: 신규 {nara_result['new']}건 추가")
-        logger.info(f"K-Startup: 신규 {kstartup_result['new']}건 추가")
-        logger.info(f"총 {nara_result['new'] + kstartup_result['new']}건 추가")
+        logger.info(f"나라장터: 신규 {nara_result['new']}건, 갱신 {nara_result['updated']}건")
+        logger.info(f"K-Startup: 신규 {kstartup_result['new']}건, 갱신 {kstartup_result['updated']}건")
+        logger.info(f"총 신규 {total_new}건, 갱신 {total_updated}건")
         logger.info("=" * 60)
 
         print("\n" + "=" * 60)
-        print("✓ Phase 1 초기 데이터 수집 완료!")
-        print(f"  - 나라장터: {nara_result['new']}건")
-        print(f"  - K-Startup: {kstartup_result['new']}건")
-        print(f"  - 총 {nara_result['new'] + kstartup_result['new']}건 추가")
+        print("✓ 공고 데이터 수집 완료!")
+        print(f"  - 나라장터: 신규 {nara_result['new']}건, 갱신 {nara_result['updated']}건")
+        print(f"  - K-Startup: 신규 {kstartup_result['new']}건, 갱신 {kstartup_result['updated']}건")
+        print(f"  - 총 신규 {total_new}건, 갱신 {total_updated}건")
         print(f"  - 소요 시간: {elapsed_time:.1f}초")
         print("=" * 60)
         print(f"\n스프레드시트 확인: https://docs.google.com/spreadsheets/d/{config.GOOGLE_SHEET_ID}")

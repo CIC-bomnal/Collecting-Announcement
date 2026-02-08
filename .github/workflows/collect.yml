@@ -1,0 +1,36 @@
+name: 공고 수집
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'  # 평일 매일 09:00 KST (UTC 00:00)
+  workflow_dispatch:         # 수동 실행
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env
+        run: |
+          cat << EOF > .env
+          NARA_API_KEY_DECODED=${{ secrets.NARA_API_KEY }}
+          KSTARTUP_API_KEY_DECODED=${{ secrets.KSTARTUP_API_KEY }}
+          GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}
+          KEYWORDS=${{ secrets.KEYWORDS }}
+          EOF
+
+      - name: Create credentials.json
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > credentials.json
+
+      - name: Run collector
+        run: python main.py
