@@ -56,19 +56,18 @@ class NaraAPIClient:
         fetch_start = datetime.now() - timedelta(days=search_days_back) if search_days_back > 0 else datetime.now().replace(hour=0, minute=0, second=0)
 
         current_date = fetch_start
-        week_num = 1
+        chunk_num = 1
 
         logger.info(f"나라장터 조회 범위: {fetch_start.strftime('%Y-%m-%d')} ~ {fetch_end.strftime('%Y-%m-%d')}")
-
         while current_date <= fetch_end:
-            # 주 단위 시작일과 종료일 계산
-            week_start = current_date
-            week_end = min(current_date + timedelta(days=6, hours=23, minutes=59, seconds=59), fetch_end)
+            # 30일 단위 시작일과 종료일 계산
+            chunk_start = current_date
+            chunk_end = min(current_date + timedelta(days=29, hours=23, minutes=59, seconds=59), fetch_end)
 
-            start_date = week_start.strftime('%Y%m%d%H%M')
-            end_date = week_end.strftime('%Y%m%d%H%M')
+            start_date = chunk_start.strftime('%Y%m%d%H%M')
+            end_date = chunk_end.strftime('%Y%m%d%H%M')
 
-            logger.info(f"나라장터 API 호출: {week_num}주차 ({week_start.strftime('%m/%d')}~{week_end.strftime('%m/%d')})")
+            logger.info(f"나라장터 API 호출: {chunk_num}차 ({chunk_start.strftime('%m/%d')}~{chunk_end.strftime('%m/%d')})")
 
             page = 1
             while True:
@@ -101,12 +100,12 @@ class NaraAPIClient:
                     page += 1
 
                 except Exception as e:
-                    logger.error(f"나라장터 API 오류 ({week_num}주차, 페이지 {page}): {str(e)}")
+                    logger.error(f"나라장터 API 오류 ({chunk_num}차, 페이지 {page}): {str(e)}")
                     break
 
-            # 다음 주로 이동
-            current_date += timedelta(days=7)
-            week_num += 1
+            # 다음 30일로 이동
+            current_date += timedelta(days=30)
+            chunk_num += 1
 
         logger.info(f"나라장터 총 {len(all_announcements)}건 수집 완료")
         return all_announcements
