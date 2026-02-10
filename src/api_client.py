@@ -36,14 +36,14 @@ class NaraAPIClient:
         self.max_retries = 3
         self.retry_delay = 5
 
-    def fetch_announcements(self, start_date_override=None, end_date_override=None) -> List[Dict]:
+    def fetch_announcements(self, search_days_back: int = 0) -> List[Dict]:
         """
         나라장터에서 공고 데이터 수집
-        기본: 오늘 ~ 4개월 후 (약 17주)
+        기본: 당일만 조회 (search_days_back=0)
+        백필: search_days_back=90 → 3개월 전~오늘
 
         Args:
-            start_date_override: 시작일 (datetime, 기본: 오늘)
-            end_date_override: 종료일 (datetime, 기본: 오늘+120일)
+            search_days_back: 오늘로부터 몇 일 전까지 조회할지 (0=당일만)
 
         Returns:
             공고 리스트
@@ -52,8 +52,8 @@ class NaraAPIClient:
 
         from datetime import datetime, timedelta
 
-        fetch_start = start_date_override or datetime.now()
-        fetch_end = end_date_override or (datetime.now() + timedelta(days=120))
+        fetch_end = datetime.now()
+        fetch_start = datetime.now() - timedelta(days=search_days_back) if search_days_back > 0 else datetime.now().replace(hour=0, minute=0, second=0)
 
         current_date = fetch_start
         week_num = 1
@@ -187,13 +187,18 @@ class NaraAPIClient:
                 if not isinstance(item, dict):
                     continue
 
+                # 공고번호 + 차수로 URL 직접 생성
+                bid_no = item.get('bidNtceNo', '')
+                bid_ord = item.get('bidNtceOrd', '00')
+                link = f"https://www.g2b.go.kr:8101/ep/invitation/publish/bidInfoDtl.do?bidno={bid_no}&bidseq={bid_ord}"
+
                 parsed_item = {
-                    'id': item.get('bidNtceNo', ''),
+                    'id': bid_no,
                     'title': item.get('bidNtceNm', ''),
                     'organization': item.get('dmndInsttNm', '정보없음'),  # 수요기관명
                     'deadline': item.get('bidClseDate', ''),  # YYYY-MM-DD
                     'budget': item.get('asignBdgtAmt') or item.get('presmptPrce') or '정보없음',
-                    'link': item.get('bidNtceUrl', ''),
+                    'link': link,
                     'registration_date': item.get('bidNtceDate', ''),  # 공고등록일
                     'source': 'nara'
                 }

@@ -3,7 +3,7 @@
 마감일 7일 이상 남은 공고 수집 및 증분 업데이트
 """
 import time
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 # 프로젝트 모듈
 import config
@@ -55,12 +55,17 @@ def main():
         )
 
         # 4. 나라장터 데이터 수집 및 필터링
-        #    오늘 ~ 4개월 후만 조회 (52주 → 17주, GitHub Actions 타임아웃 방지)
-        logger.info("\n[나라장터] 데이터 수집 시작...")
-        nara_announcements = nara_client.fetch_announcements()
+        logger.info(f"\n[나라장터] 데이터 수집 시작... (검색 범위: {config.SEARCH_DAYS_BACK}일 전~오늘)")
+        nara_announcements = nara_client.fetch_announcements(search_days_back=config.SEARCH_DAYS_BACK)
 
-        logger.info(f"[나라장터] 키워드 필터링 시작... (키워드 {len(config.KEYWORDS)}개)")
-        nara_filtered_keyword = filter_by_keyword(nara_announcements, config.KEYWORDS)
+        logger.info(f"[나라장터] 키워드 필터링 시작... (일반 {len(config.KEYWORDS)}개, 필수 {len(config.MUST_EXTRACT_KEYWORDS)}개, 끝부분 {len(config.END_KEYWORDS)}개, 조건부 {len(config.CONDITIONAL_KEYWORDS)}개)")
+        nara_filtered_keyword = filter_by_keyword(
+            nara_announcements,
+            keywords=config.KEYWORDS,
+            must_extract_keywords=config.MUST_EXTRACT_KEYWORDS,
+            end_keywords=config.END_KEYWORDS,
+            conditional_keywords=config.CONDITIONAL_KEYWORDS
+        )
 
         logger.info(f"[나라장터] 마감일 필터링 시작...")
         nara_filtered_final = filter_by_deadline(
@@ -76,9 +81,18 @@ def main():
         logger.info(f"[PDF] {len(pdf_names)}개 사업명 추출 완료")
 
         # 6. K-Startup 데이터 수집 및 필터링
-        #    흐름: API 전체 fetch → 마감일 필터 → (키워드 OR PDF 사업명) 매칭
-        logger.info("\n[K-Startup] 데이터 수집 시작...")
+        #    흐름: API 전체 fetch → 등록일 필터 → 마감일 필터 → (키워드 OR PDF 사업명) 매칭
+        logger.info(f"\n[K-Startup] 데이터 수집 시작... (검색 범위: {config.SEARCH_DAYS_BACK}일 전~오늘)")
         kstartup_announcements = kstartup_client.fetch_announcements(year=2026)
+
+        # 등록일 기준 필터 (검색 범위 내 공고만)
+        cutoff_date = (date.today() - timedelta(days=config.SEARCH_DAYS_BACK)).isoformat()
+        before_count = len(kstartup_announcements)
+        kstartup_announcements = [
+            a for a in kstartup_announcements
+            if a.get('registration_date', '') >= cutoff_date
+        ]
+        logger.info(f"[K-Startup] 등록일 필터: {before_count}건 → {len(kstartup_announcements)}건 (기준: {cutoff_date}~)")
 
         logger.info(f"[K-Startup] 마감일 필터링 시작...")
         kstartup_deadline_filtered = filter_by_deadline(
@@ -87,8 +101,14 @@ def main():
             config.BASE_DATE
         )
 
-        logger.info(f"[K-Startup] 키워드 필터링... (키워드 {len(config.KEYWORDS)}개)")
-        kstartup_keyword_matched = filter_by_keyword(kstartup_deadline_filtered, config.KEYWORDS)
+        logger.info(f"[K-Startup] 키워드 필터링... (일반 {len(config.KEYWORDS)}개, 필수 {len(config.MUST_EXTRACT_KEYWORDS)}개, 끝부분 {len(config.END_KEYWORDS)}개, 조건부 {len(config.CONDITIONAL_KEYWORDS)}개)")
+        kstartup_keyword_matched = filter_by_keyword(
+            kstartup_deadline_filtered,
+            keywords=config.KEYWORDS,
+            must_extract_keywords=config.MUST_EXTRACT_KEYWORDS,
+            end_keywords=config.END_KEYWORDS,
+            conditional_keywords=config.CONDITIONAL_KEYWORDS
+        )
 
         logger.info(f"[K-Startup] PDF 사업명 매칭... (사업명 {len(pdf_names)}개, 임계값 {config.MATCH_THRESHOLD})")
         kstartup_pdf_matched = filter_by_pdf_names(
