@@ -187,18 +187,13 @@ class NaraAPIClient:
                 if not isinstance(item, dict):
                     continue
 
-                # 공고번호 + 차수로 URL 직접 생성
-                bid_no = item.get('bidNtceNo', '')
-                bid_ord = item.get('bidNtceOrd', '00')
-                link = f"https://www.g2b.go.kr:8101/ep/invitation/publish/bidInfoDtl.do?bidno={bid_no}&bidseq={bid_ord}"
-
                 parsed_item = {
-                    'id': bid_no,
+                    'id': item.get('bidNtceNo', ''),
                     'title': item.get('bidNtceNm', ''),
                     'organization': item.get('dmndInsttNm', '정보없음'),  # 수요기관명
                     'deadline': item.get('bidClseDate', ''),  # YYYY-MM-DD
                     'budget': item.get('asignBdgtAmt') or item.get('presmptPrce') or '정보없음',
-                    'link': link,
+                    'link': item.get('bidNtceUrl', ''),
                     'registration_date': item.get('bidNtceDate', ''),  # 공고등록일
                     'source': 'nara'
                 }
