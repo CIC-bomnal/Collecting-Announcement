@@ -3,7 +3,17 @@
     "allow": [
       "Bash(ls:*)",
       "WebFetch(domain:www.k-startup.go.kr)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(find:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "WebSearch",
+      "WebFetch(domain:www.g2b.go.kr)",
+      "WebFetch(domain:www.g2bplus.kr)",
+      "WebFetch(domain:www.data.go.kr)"
     ]
   }
 }

@@ -10,33 +10,79 @@ import logging
 logger = logging.getLogger('announcement_collector')
 
 
-def filter_by_keyword(announcements: List[Dict], keywords: List[str]) -> List[Dict]:
+def _normalize(s: str) -> str:
+    """공백 제거 + 소문자 변환 (띄어쓰기 무관 매칭용)"""
+    return s.replace(' ', '').lower()
+
+
+def filter_by_keyword(announcements: List[Dict], keywords: List[str],
+                      must_extract_keywords: List[str] = None,
+                      end_keywords: List[str] = None,
+                      conditional_keywords: List[str] = None) -> List[Dict]:
     """
-    공고 제목에 키워드가 하나 이상 포함된 항목만 필터링
+    다단계 키워드 필터링 (띄어쓰기 무관)
+
+    매칭 우선순위:
+    1) 필수(must_extract): 하나라도 포함 → 무조건 추출
+    2) 끝부분(end): 제목 맨 끝에 매칭 → 무조건 추출
+    3) 일반(keywords): 하나라도 매칭 → 추출
+    4) 조건부(conditional): 일반/필수/끝부분 키워드 없이 단독 매칭 시 미추출
 
     Args:
         announcements: 공고 리스트
-        keywords: 키워드 리스트
+        keywords: 일반 키워드 리스트
+        must_extract_keywords: 필수 추출 키워드 리스트
+        end_keywords: 끝부분 매칭 키워드 리스트
+        conditional_keywords: 조건부 키워드 리스트
 
     Returns:
         필터링된 공고 리스트
     """
-    if not keywords:
+    must_norm = [_normalize(k) for k in (must_extract_keywords or []) if k.strip()]
+    end_norm = [_normalize(k) for k in (end_keywords or []) if k.strip()]
+    reg_norm = [_normalize(k) for k in keywords if k.strip()]
+    cond_norm = [_normalize(k) for k in (conditional_keywords or []) if k.strip()]
+
+    all_empty = not must_norm and not end_norm and not reg_norm and not cond_norm
+    if all_empty:
         logger.warning("키워드가 비어있습니다. 모든 공고를 통과시킵니다.")
         return announcements
 
     filtered = []
+    must_count = 0
+    end_count = 0
+    reg_count = 0
+    cond_only_count = 0
 
     for announcement in announcements:
-        title = announcement.get('title', '').lower()
+        title = announcement.get('title', '')
+        norm_title = _normalize(title)
 
-        # 키워드 중 하나라도 포함되면 선택
-        for keyword in keywords:
-            if keyword.strip().lower() in title:
-                filtered.append(announcement)
-                break  # 하나만 매칭되어도 추가
+        # 1) 필수 키워드: 하나라도 포함 → 무조건 추출
+        if any(kw in norm_title for kw in must_norm):
+            filtered.append(announcement)
+            must_count += 1
+            continue
 
-    logger.info(f"키워드 필터링: {len(announcements)}건 → {len(filtered)}건")
+        # 2) 끝부분 키워드: 제목 끝에 매칭 → 무조건 추출
+        if any(norm_title.endswith(kw) for kw in end_norm):
+            filtered.append(announcement)
+            end_count += 1
+            continue
+
+        # 3) 일반 키워드: 하나라도 매칭 → 추출
+        if any(kw in norm_title for kw in reg_norm):
+            filtered.append(announcement)
+            reg_count += 1
+            continue
+
+        # 4) 조건부 키워드: 위 1~3에서 매칭 안 됐으므로 단독 매칭 → 미추출
+        if any(kw in norm_title for kw in cond_norm):
+            cond_only_count += 1
+            logger.debug(f"조건부 키워드만 매칭 (미추출): {title[:40]}")
+
+    logger.info(f"키워드 필터링: {len(announcements)}건 → {len(filtered)}건 "
+                f"(필수 {must_count}, 끝부분 {end_count}, 일반 {reg_count}, 조건부단독 {cond_only_count}건 제외)")
     return filtered
 
 
@@ -114,7 +160,7 @@ def filter_by_pdf_names(announcements: List[Dict], pdf_names: List[str], thresho
 
 def filter_by_exclusion(announcements: List[Dict], exclusion_keywords: List[str]) -> List[Dict]:
     """
-    금지어가 포함된 공고를 제외하는 필터 (육성기업 관점)
+    금지어가 포함된 공고를 제외하는 필터 (띄어쓰기 무관)
 
     Args:
         announcements: 공고 리스트
@@ -127,14 +173,15 @@ def filter_by_exclusion(announcements: List[Dict], exclusion_keywords: List[str]
         logger.info("금지어가 비어있습니다. 전체 공고를 통과시킵니다.")
         return list(announcements)
 
+    excl_norm = [_normalize(k) for k in exclusion_keywords if k.strip()]
     filtered = []
 
     for announcement in announcements:
-        title = announcement.get('title', '').lower()
+        norm_title = _normalize(announcement.get('title', ''))
         excluded = False
 
-        for keyword in exclusion_keywords:
-            if keyword.strip().lower() in title:
+        for kw in excl_norm:
+            if kw in norm_title:
                 excluded = True
                 break
 

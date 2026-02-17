@@ -32,6 +32,21 @@ KEYWORDS = [k.strip() for k in KEYWORDS_STR.split(',') if k.strip()]
 # 필터링 설정
 MIN_DAYS_REMAINING = int(os.getenv('MIN_DAYS_REMAINING', '7'))
 
+# 검색 범위 설정 (실행일로부터 N일 전까지 탐색, 기본 60일=2개월)
+SEARCH_DAYS_BACK = int(os.getenv('SEARCH_DAYS_BACK', '60'))
+
+# 필수 추출 키워드 (하나라도 매칭 → 무조건 추출)
+MUST_EXTRACT_KEYWORDS_STR = os.getenv('MUST_EXTRACT_KEYWORDS', '협력기관,수행기관,주관기관,액셀러레이팅')
+MUST_EXTRACT_KEYWORDS = [k.strip() for k in MUST_EXTRACT_KEYWORDS_STR.split(',') if k.strip()]
+
+# 끝부분 키워드 (제목 맨 끝에 매칭 → 무조건 추출)
+END_KEYWORDS_STR = os.getenv('END_KEYWORDS', '운영용역')
+END_KEYWORDS = [k.strip() for k in END_KEYWORDS_STR.split(',') if k.strip()]
+
+# 조건부 키워드 (일반/필수/끝부분 키워드 1개 이상 함께 매칭 시에만 추출)
+CONDITIONAL_KEYWORDS_STR = os.getenv('CONDITIONAL_KEYWORDS', '소상공인,소셜,활성화')
+CONDITIONAL_KEYWORDS = [k.strip() for k in CONDITIONAL_KEYWORDS_STR.split(',') if k.strip()]
+
 # 로그 설정
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LOG_RETENTION_DAYS = int(os.getenv('LOG_RETENTION_DAYS', '30'))
@@ -90,7 +105,8 @@ def validate_config():
     print(f"  - 나라장터 API 키: {NARA_API_KEY[:20]}...")
     print(f"  - K-Startup API 키: {KSTARTUP_API_KEY[:20]}...")
     print(f"  - 스프레드시트 ID: {GOOGLE_SHEET_ID}")
-    print(f"  - 키워드 개수: {len(KEYWORDS)}개")
+    print(f"  - 키워드: 일반 {len(KEYWORDS)}개, 필수 {len(MUST_EXTRACT_KEYWORDS)}개, 끝부분 {len(END_KEYWORDS)}개, 조건부 {len(CONDITIONAL_KEYWORDS)}개")
     print(f"  - 금지어 개수: {len(EXCLUSION_KEYWORDS)}개")
+    print(f"  - 검색 범위: {SEARCH_DAYS_BACK}일 전~오늘")
     print(f"  - 최소 남은 일수: {MIN_DAYS_REMAINING}일")
     print(f"  - 기준일: {BASE_DATE}")
