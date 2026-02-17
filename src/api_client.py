@@ -36,14 +36,11 @@ class NaraAPIClient:
         self.max_retries = 3
         self.retry_delay = 5
 
-    def fetch_announcements(self, start_date_override=None, end_date_override=None) -> List[Dict]:
+    def fetch_announcements(self) -> List[Dict]:
         """
         나라장터에서 공고 데이터 수집
-        기본: 오늘 ~ 4개월 후 (약 17주)
-
-        Args:
-            start_date_override: 시작일 (datetime, 기본: 오늘)
-            end_date_override: 종료일 (datetime, 기본: 오늘+120일)
+        최근 1개월간 등록된 공고 조회 (API 범위 제한: 1개월)
+        bidNtceBgnDt/bidNtceEndDt는 공고 등록일 기준 필터
 
         Returns:
             공고 리스트
@@ -52,61 +49,43 @@ class NaraAPIClient:
 
         from datetime import datetime, timedelta
 
-        fetch_start = start_date_override or datetime.now()
-        fetch_end = end_date_override or (datetime.now() + timedelta(days=120))
+        fetch_start = datetime.now() - timedelta(days=30)
+        fetch_end = datetime.now()
 
-        current_date = fetch_start
-        week_num = 1
+        start_date = fetch_start.strftime('%Y%m%d%H%M')
+        end_date = fetch_end.strftime('%Y%m%d%H%M')
 
         logger.info(f"나라장터 조회 범위: {fetch_start.strftime('%Y-%m-%d')} ~ {fetch_end.strftime('%Y-%m-%d')}")
 
-        while current_date <= fetch_end:
-            # 주 단위 시작일과 종료일 계산
-            week_start = current_date
-            week_end = min(current_date + timedelta(days=6, hours=23, minutes=59, seconds=59), fetch_end)
+        page = 1
+        while True:
+            params = {
+                'ServiceKey': self.api_key,
+                'type': 'json',
+                'numOfRows': 100,
+                'pageNo': page,
+                'bidNtceBgnDt': start_date,
+                'bidNtceEndDt': end_date
+            }
 
-            start_date = week_start.strftime('%Y%m%d%H%M')
-            end_date = week_end.strftime('%Y%m%d%H%M')
+            try:
+                response = self._make_request(params)
+                raw_items_count = self._get_raw_items_count(response)
+                items = self._parse_response(response)
 
-            logger.info(f"나라장터 API 호출: {week_num}주차 ({week_start.strftime('%m/%d')}~{week_end.strftime('%m/%d')})")
-
-            page = 1
-            while True:
-                params = {
-                    'ServiceKey': self.api_key,
-                    'type': 'json',
-                    'numOfRows': 100,
-                    'pageNo': page,
-                    'bidNtceBgnDt': start_date,
-                    'bidNtceEndDt': end_date
-                }
-
-                try:
-                    response = self._make_request(params)
-
-                    # 원본 응답에서 실제 반환된 아이템 수 확인 (페이지네이션 판단용)
-                    raw_items_count = self._get_raw_items_count(response)
-
-                    items = self._parse_response(response)
-
-                    if not items and raw_items_count == 0:
-                        break
-
-                    all_announcements.extend(items)
-                    logger.debug(f"  페이지 {page}: {len(items)}건 수집 (원본 {raw_items_count}건)")
-
-                    # 다음 페이지 확인: 원본 응답의 아이템 수로 판단
-                    if raw_items_count < 100:
-                        break
-                    page += 1
-
-                except Exception as e:
-                    logger.error(f"나라장터 API 오류 ({week_num}주차, 페이지 {page}): {str(e)}")
+                if not items and raw_items_count == 0:
                     break
 
-            # 다음 주로 이동
-            current_date += timedelta(days=7)
-            week_num += 1
+                all_announcements.extend(items)
+                logger.debug(f"  페이지 {page}: {len(items)}건 수집 (원본 {raw_items_count}건)")
+
+                if raw_items_count < 100:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"나라장터 API 오류 (페이지 {page}): {str(e)}")
+                break
 
         logger.info(f"나라장터 총 {len(all_announcements)}건 수집 완료")
         return all_announcements
