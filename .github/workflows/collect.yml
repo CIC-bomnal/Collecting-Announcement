@@ -2,7 +2,7 @@ name: 공고 수집
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 매일 09:00 KST (UTC 00:00)
+    - cron: '0 19 * * *'  # 매일 KST 04:00 예약 → 지연 감안 09시경 실행
   workflow_dispatch:         # 수동 실행
 
 jobs:
