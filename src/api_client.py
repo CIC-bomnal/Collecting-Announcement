@@ -74,7 +74,7 @@ class NaraAPIClient:
                 params = {
                     'ServiceKey': self.api_key,
                     'type': 'json',
-                    'numOfRows': 100,
+                    'numOfRows': 999,
                     'pageNo': page,
                     'bidNtceBgnDt': start_date,
                     'bidNtceEndDt': end_date
