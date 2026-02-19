@@ -32,8 +32,8 @@ KEYWORDS = [k.strip() for k in KEYWORDS_STR.split(',') if k.strip()]
 # 필터링 설정
 MIN_DAYS_REMAINING = int(os.getenv('MIN_DAYS_REMAINING', '7'))
 
-# 검색 범위 설정 (실행일로부터 N일 전까지 탐색, 기본 60일=2개월)
-SEARCH_DAYS_BACK = int(os.getenv('SEARCH_DAYS_BACK', '60'))
+# 검색 범위 설정 (실행일로부터 N일 전까지 탐색, 기본 30일=1개월)
+SEARCH_DAYS_BACK = int(os.getenv('SEARCH_DAYS_BACK', '30'))
 
 # 필수 추출 키워드 (하나라도 매칭 → 무조건 추출)
 MUST_EXTRACT_KEYWORDS_STR = os.getenv('MUST_EXTRACT_KEYWORDS', '협력기관,수행기관,주관기관,액셀러레이팅')

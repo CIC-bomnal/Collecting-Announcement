@@ -318,8 +318,10 @@ class SpreadsheetManager:
         link = announcement.get('link', '')
         announcement_title_with_link = f'=HYPERLINK("{link}", "{title}")'
 
-        # 날짜 형식: YY-MM-DD
-        now = datetime.now().strftime('%y-%m-%d')
+        # 날짜 형식: YY-MM-DD (KST)
+        from datetime import timezone, timedelta as td
+        KST = timezone(td(hours=9))
+        now = datetime.now(KST).strftime('%y-%m-%d')
 
         # 마감일 YY-MM-DD 변환
         deadline = announcement.get('deadline', '')

@@ -107,8 +107,19 @@ class NaraAPIClient:
             current_date += timedelta(days=30)
             chunk_num += 1
 
-        logger.info(f"나라장터 총 {len(all_announcements)}건 수집 완료")
-        return all_announcements
+        # 청크 경계 겹침으로 인한 중복 제거
+        seen_ids = set()
+        unique = []
+        for a in all_announcements:
+            if a['id'] not in seen_ids:
+                seen_ids.add(a['id'])
+                unique.append(a)
+
+        if len(unique) < len(all_announcements):
+            logger.info(f"나라장터 청크 중복 제거: {len(all_announcements)}건 → {len(unique)}건")
+
+        logger.info(f"나라장터 총 {len(unique)}건 수집 완료")
+        return unique
 
     def _make_request(self, params: Dict) -> Dict:
         """
