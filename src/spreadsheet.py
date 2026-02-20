@@ -130,6 +130,7 @@ class SpreadsheetManager:
 
             # 2) 신규 vs 기존 분류
             new_rows = []
+            new_ids = set()
             update_cells = []
             last_col = chr(ord('A') + len(headers) - 1)
 
@@ -148,9 +149,11 @@ class SpreadsheetManager:
                         'values': [row_data]
                     })
                 else:
-                    next_row = len(all_values) + len(new_rows) + 1
-                    row_data = self._prepare_row_data(announcement, next_row, include_overview, include_budget)
-                    new_rows.append(row_data)
+                    if ann_id and ann_id not in new_ids:
+                        new_ids.add(ann_id)
+                        next_row = len(all_values) + len(new_rows) + 1
+                        row_data = self._prepare_row_data(announcement, next_row, include_overview, include_budget)
+                        new_rows.append(row_data)
 
             # 3) 일괄 업데이트
             if new_rows:
@@ -159,6 +162,11 @@ class SpreadsheetManager:
                 worksheet.batch_update(update_cells, value_input_option='USER_ENTERED')
 
             logger.info(f"✓ {sheet_name} 탭 업데이트 완료: 신규 {len(new_rows)}건, 갱신 {len(update_cells)}건")
+
+            # 4) 최종 중복 확인
+            dedup_count = self.deduplicate_sheet(sheet_name, headers)
+            if dedup_count:
+                logger.info(f"✓ {sheet_name} 탭 최종 중복 제거: {dedup_count}건")
 
         except Exception as e:
             logger.error(f"업데이트 오류: {str(e)}")
