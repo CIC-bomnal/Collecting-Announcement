@@ -13,7 +13,10 @@
       "WebSearch",
       "WebFetch(domain:www.g2b.go.kr)",
       "WebFetch(domain:www.g2bplus.kr)",
-      "WebFetch(domain:www.data.go.kr)"
+      "WebFetch(domain:www.data.go.kr)",
+      "Bash(gh run list:*)",
+      "Bash(gh auth login:*)",
+      "Bash(gh run view:*)"
     ]
   }
 }

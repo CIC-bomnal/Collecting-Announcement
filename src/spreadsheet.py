@@ -4,7 +4,7 @@ Google Sheets 연동 모듈
 """
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict
 import logging
 
@@ -168,6 +168,12 @@ class SpreadsheetManager:
             if dedup_count:
                 logger.info(f"✓ {sheet_name} 탭 최종 중복 제거: {dedup_count}건")
 
+            # 5) 만료 공고 삭제
+            from config import MIN_DAYS_REMAINING
+            expired_count = self.remove_expired_rows(sheet_name, headers, MIN_DAYS_REMAINING)
+            if expired_count:
+                logger.info(f"✓ {sheet_name} 탭 만료 공고 삭제: {expired_count}건")
+
         except Exception as e:
             logger.error(f"업데이트 오류: {str(e)}")
             raise
@@ -187,7 +193,7 @@ class SpreadsheetManager:
             삭제된 행 수
         """
         worksheet = self.get_or_create_worksheet(sheet_name)
-        all_values = worksheet.get_all_values()
+        all_values = worksheet.get_all_values(value_render_option='FORMULA')
 
         if len(all_values) <= 1:
             return 0
@@ -208,12 +214,65 @@ class SpreadsheetManager:
         if dup_count == 0:
             return 0
 
+        # 남은일수 수식 행번호 보정
+        if '남은일수' in headers and '마감일' in headers:
+            remaining_idx = headers.index('남은일수')
+            deadline_col = chr(ord('A') + headers.index('마감일'))
+            for i, row in enumerate(unique_rows[1:], start=2):
+                if len(row) > remaining_idx:
+                    row[remaining_idx] = f'={deadline_col}{i}-TODAY()'
+
         # 시트 전체를 중복 제거된 데이터로 교체 (API 호출 2회: clear + update)
         worksheet.clear()
         worksheet.update(range_name='A1', values=unique_rows, value_input_option='USER_ENTERED')
         logger.info(f"✓ {sheet_name} 탭 중복 제거: {dup_count}건 삭제 ({len(all_values)-1}행 → {len(unique_rows)-1}행)")
 
         return dup_count
+
+    def remove_expired_rows(self, sheet_name: str, headers: List[str], min_days: int = 7) -> int:
+        """마감일 기준 min_days 미만 남은 행 삭제"""
+        worksheet = self.get_or_create_worksheet(sheet_name)
+        all_values = worksheet.get_all_values(value_render_option='FORMULA')
+
+        if len(all_values) <= 1:
+            return 0
+
+        deadline_col_idx = headers.index('마감일')
+        today = date.today()
+        valid_rows = [all_values[0]]  # 헤더 유지
+        expired_count = 0
+
+        for row in all_values[1:]:
+            deadline_str = row[deadline_col_idx] if len(row) > deadline_col_idx else ''
+            if not deadline_str:
+                valid_rows.append(row)  # 마감일 없으면 유지
+                continue
+            try:
+                deadline = datetime.strptime(deadline_str, '%y-%m-%d').date()
+                days_remaining = (deadline - today).days
+                if days_remaining >= min_days:
+                    valid_rows.append(row)
+                else:
+                    expired_count += 1
+            except ValueError:
+                valid_rows.append(row)  # 파싱 실패 시 유지
+
+        if expired_count == 0:
+            return 0
+
+        # 남은일수 수식 행번호 보정
+        if '남은일수' in headers and '마감일' in headers:
+            remaining_idx = headers.index('남은일수')
+            deadline_col = chr(ord('A') + headers.index('마감일'))
+            for i, row in enumerate(valid_rows[1:], start=2):
+                if len(row) > remaining_idx:
+                    row[remaining_idx] = f'={deadline_col}{i}-TODAY()'
+
+        worksheet.clear()
+        worksheet.update(range_name='A1', values=valid_rows, value_input_option='USER_ENTERED')
+        logger.info(f"✓ {sheet_name} 탭 만료 공고 삭제: {expired_count}건 ({len(all_values)-1}행 → {len(valid_rows)-1}행)")
+
+        return expired_count
 
     def highlight_rows(self, sheet_name: str, headers: List[str], matched_ids: List[str]):
         """
