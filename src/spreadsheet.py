@@ -4,7 +4,7 @@ Google Sheets 연동 모듈
 """
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict
 import logging
 
@@ -248,7 +248,10 @@ class SpreadsheetManager:
                 valid_rows.append(row)  # 마감일 없으면 유지
                 continue
             try:
-                deadline = datetime.strptime(deadline_str, '%y-%m-%d').date()
+                if isinstance(deadline_str, (int, float)):
+                    deadline = date(1899, 12, 30) + timedelta(days=int(deadline_str))
+                else:
+                    deadline = datetime.strptime(str(deadline_str), '%y-%m-%d').date()
                 days_remaining = (deadline - today).days
                 if days_remaining >= min_days:
                     valid_rows.append(row)
